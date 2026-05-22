@@ -319,14 +319,115 @@
 <script>
     vkBridge.send("VKWebAppInit");
 
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzCi6lE4JffsS9T17crFTdW8Mbgslt-NS0T41-xW46P6KQTjnaVR_7oaLdaY6jcfVU-/exec'; // ← Замени!
-    const GITHUB_IMG_BASE = 'https://raw.githubusercontent.com/Weifox1307/5verst_stankozavod_bot_vk/main/';
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzCi6lE4JffsS9T17crFTdW8Mbgslt-NS0T41-xW46P6KQTjnaVR_7oaLdaY6jcfVU-/exec';
 
     let selectedVolunteer = null;
     let vkUser = null;
     let currentVkGroupId = null;
 
-    // ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
+    // ==================== ИНИЦИАЛИЗАЦИЯ ====================
+    async function init() {
+        try {
+            alert("1. Запуск init()");
+
+            vkUser = await vkBridge.send("VKWebAppGetUserInfo");
+            alert("2. VK User ID: " + vkUser.id);
+
+            // Получаем параметры запуска
+            let launchParams = {};
+            try {
+                launchParams = await vkBridge.send("VKWebAppGetLaunchParams");
+                alert("3. Launch Params: " + JSON.stringify(launchParams));
+            } catch (e) {
+                alert("3. LaunchParams ошибка: " + e.message);
+            }
+
+            // Определяем ID группы / чата
+            currentVkGroupId = launchParams.group_id || launchParams.vk_group_id || launchParams.peer_id;
+
+            // Если открыто из чата (peer_id начинается с 200000000)
+            if (currentVkGroupId && String(currentVkGroupId).startsWith("200000000")) {
+                alert("4. Открыто из чата (peer_id = " + currentVkGroupId + "). Пытаемся получить group_id...");
+                try {
+                    const groupInfo = await vkBridge.send("VKWebAppGetGroupInfo");
+                    currentVkGroupId = groupInfo.id;
+                    alert("5. Получили group_id через GetGroupInfo: " + currentVkGroupId);
+                } catch (e) {
+                    alert("5. GetGroupInfo тоже не сработал: " + e.message);
+                }
+            }
+
+            if (!currentVkGroupId) {
+                alert("❌ Не удалось определить ID группы/чата");
+                document.getElementById('park_name').innerText = "Не удалось определить группу";
+                return;
+            }
+
+            alert("✅ Group ID определён: " + currentVkGroupId);
+
+            // === Запрос конфигурации парка ===
+            const configUrl = `${SCRIPT_URL}?get_config=1&vk_group_id=${currentVkGroupId}`;
+            alert("6. Запрос к GAS: " + configUrl);
+
+            const configRes = await fetch(configUrl);
+            const configText = await configRes.text();
+            alert("7. Ответ GAS (первые 300 символов): " + configText.substring(0, 300));
+
+            let config = {};
+            try {
+                config = JSON.parse(configText);
+            } catch (e) {
+                alert("❌ Ошибка парсинга JSON от GAS");
+                return;
+            }
+
+            if (config.error) {
+                alert("❌ Ошибка от GAS: " + config.error);
+                document.getElementById('park_name').innerHTML = `<span style="color:red;">Парк не найден (ID: ${currentVkGroupId})</span>`;
+                return;
+            }
+
+            document.getElementById('park_name').innerText = config.park_name || "Парк 5 вёрст";
+            document.getElementById('about_park_name').innerText = config.park_name || "5 вёрст";
+
+            alert("✅ Парк успешно загружен: " + config.park_name);
+
+            // Дата
+            const dRes = await fetch(`${SCRIPT_URL}?get_date=1&vk_group_id=${currentVkGroupId}`);
+            const dData = await dRes.json();
+            document.getElementById('event_date').innerText = dData.date;
+
+            // Проверка пользователя
+            await checkUserExists();
+
+            await loadQueue();
+            validateForm();
+
+            alert("🎉 Приложение полностью загружено!");
+
+        } catch (e) {
+            alert("💥 Критическая ошибка: " + e.message);
+            console.error(e);
+            document.getElementById('park_name').innerText = "Ошибка загрузки";
+        }
+    }
+
+    async function checkUserExists() {
+        try {
+            const res = await fetch(`${SCRIPT_URL}?check_vk_id=${vkUser.id}&vk_group_id=${currentVkGroupId}`);
+            const data = await res.json();
+            if (data.found) {
+                selectedVolunteer = { id: data.verst_id, full_name: data.full_name };
+                document.getElementById('verst_search').value = data.full_name;
+                document.getElementById('welcome_back').style.display = 'block';
+                document.getElementById('welcome_back').innerHTML = `👋 <b>${vkUser.first_name}</b>, данные подставлены!`;
+            }
+        } catch (e) {}
+    }
+
+    init();
+
+    // ==================== Остальные функции (без изменений) ====================
     function switchTab(t) {
         document.getElementById('section_rec').style.display = t === 'rec' ? 'block' : 'none';
         document.getElementById('section_rate').style.display = t === 'rate' ? 'block' : 'none';
@@ -354,88 +455,19 @@
         document.getElementById('qr_name_text').innerText = name.toUpperCase();
         openModal('qr_modal');
         const img = new Image();
-        img.onload = () => { 
-            qrBox.innerHTML = ''; 
-            img.className = 'qr-code-img'; 
-            img.style.width = '200px'; 
-            img.style.height = '200px'; 
-            qrBox.appendChild(img); 
+        img.onload = () => {
+            qrBox.innerHTML = '';
+            img.className = 'qr-code-img';
+            img.style.width = '200px';
+            img.style.height = '200px';
+            qrBox.appendChild(img);
         };
         img.src = qrUrl;
     }
 
     function closeQR() { closeModal('qr_modal'); }
 
-    // ==================== ИНИЦИАЛИЗАЦИЯ ====================
-    async function init() {
-        alert("Launch Params: " + JSON.stringify(launchParams));
-        try {
-            vkUser = await vkBridge.send("VKWebAppGetUserInfo");
-
-            // === Получаем ID группы максимально надёжно ===
-            let launchParams = {};
-            try {
-                launchParams = await vkBridge.send("VKWebAppGetLaunchParams");
-            } catch (e) {}
-
-            currentVkGroupId = launchParams.group_id || launchParams.vk_group_id || launchParams.peer_id;
-
-            // Если peer_id — это чат, пытаемся извлечь group_id
-            if (currentVkGroupId && String(currentVkGroupId).startsWith('200000000')) {
-                // Это ID чата, а не группы. Пробуем получить group_id другим способом
-                try {
-                    const groupInfo = await vkBridge.send("VKWebAppGetGroupInfo");
-                    currentVkGroupId = groupInfo.id;
-                } catch (e) {}
-            }
-
-            if (!currentVkGroupId) {
-                alert("Не удалось определить ID группы.\nПопробуйте открыть приложение из меню группы.");
-                return;
-            }
-
-            console.log("✅ Определён Group ID:", currentVkGroupId);
-
-            // Получаем данные парка
-            const configRes = await fetch(`${SCRIPT_URL}?get_config=1&vk_group_id=${currentVkGroupId}`);
-            const config = await configRes.json();
-
-            if (config.error) {
-                document.getElementById('park_name').innerHTML = `<span style="color:red;">Парк не найден в базе</span>`;
-                alert("Парк не найден в Registry!\nID группы: " + currentVkGroupId);
-                return;
-            }
-
-            document.getElementById('park_name').innerText = config.park_name;
-            document.getElementById('about_park_name').innerText = config.park_name;
-
-            // Дата
-            const dRes = await fetch(`${SCRIPT_URL}?get_date=1&vk_group_id=${currentVkGroupId}`);
-            const dData = await dRes.json();
-            document.getElementById('event_date').innerText = dData.date;
-
-            // Проверка пользователя
-            const checkRes = await fetch(`${SCRIPT_URL}?check_vk_id=${vkUser.id}&vk_group_id=${currentVkGroupId}`);
-            const checkData = await checkRes.json();
-            if (checkData.found) {
-                selectedVolunteer = { id: checkData.verst_id, full_name: checkData.full_name };
-                document.getElementById('verst_search').value = checkData.full_name;
-                document.getElementById('welcome_back').style.display = 'block';
-                document.getElementById('welcome_back').innerHTML = `👋 <b>${vkUser.first_name}</b>, данные подставлены!`;
-            }
-
-            await loadQueue();
-            validateForm();
-
-        } catch (e) {
-            console.error(e);
-            document.getElementById('park_name').innerText = "Ошибка инициализации";
-        }
-    }
-
-    init();
-
-    // ==================== ОБРАБОТКА РОЛЕЙ ====================
+    // Мультивыбор ролей
     document.querySelectorAll('.role-option').forEach(item => {
         item.onclick = function(e) {
             const cb = this.querySelector('input');
@@ -468,13 +500,13 @@
         marshalCont.style.display = checked.includes("7") ? 'block' : 'none';
         paceCont.style.display = checked.includes("28") ? 'block' : 'none';
 
-        const needsComment = checked.some(id => ["8", "9", "35", "1001", "1002", "1003"].includes(id));
+        const needsComment = checked.some(id => ["8","9","35","1001","1002","1003"].includes(id));
         commentBox.style.display = needsComment ? 'block' : 'none';
 
         validateForm();
     }
 
-    // ==================== ОСТАЛЬНЫЕ ФУНКЦИИ (как в оригинале) ====================
+    // Остальные функции (saveTheme, search, sendData и т.д.)
     async function saveTheme() {
         const text = document.getElementById('theme_input').value;
         await fetch(SCRIPT_URL, { 
@@ -486,8 +518,7 @@
 
     function toggleFriendVk() {
         const mode = document.getElementById('vk_id_mode').value;
-        const container = document.getElementById('friend_vk_container');
-        container.style.display = mode === 'friend' ? 'block' : 'none';
+        document.getElementById('friend_vk_container').style.display = mode === 'friend' ? 'block' : 'none';
         if (mode === 'me') document.getElementById('selected_vk_id').value = "";
         validateForm();
     }
@@ -519,7 +550,6 @@
     function handleMarshalSelect() { handleRoleChange(); }
     function handlePaceSelect() { handleRoleChange(); }
 
-    // Поиск
     async function searchHandler(query, resultBox, isRecord) {
         if (query.length < 3) { resultBox.style.display = 'none'; return; }
         resultBox.innerHTML = '<div style="padding:15px">Ищем...</div>';
@@ -550,11 +580,6 @@
         window.searchTimeout = setTimeout(() => searchHandler(e.target.value.trim(), document.getElementById('search_results'), true), 500);
     });
 
-    document.getElementById('rate_search').addEventListener('input', (e) => {
-        clearTimeout(window.rateTimeout);
-        window.rateTimeout = setTimeout(() => searchHandler(e.target.value.trim(), document.getElementById('rate_results'), false), 500);
-    });
-
     function validateForm() {
         const anyChecked = document.querySelectorAll('.role-option input:checked').length > 0;
         const mode = document.getElementById('vk_id_mode').value;
@@ -564,8 +589,7 @@
 
     async function sendData() {
         const btn = document.getElementById('submit_btn');
-        btn.innerText = "Записываем..."; 
-        btn.disabled = true;
+        btn.innerText = "Записываем..."; btn.disabled = true;
 
         const roles = Array.from(document.querySelectorAll('.role-option input:checked')).map(cb => {
             const item = cb.parentElement;
@@ -596,12 +620,10 @@
         const data = await res.json();
         const container = document.getElementById('queue_container');
         container.innerHTML = '';
-
-        if (data.length === 0) {
+        if (!data || data.length === 0) {
             container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">Пока никто не записался</div>';
             return;
         }
-
         data.reverse().forEach(item => {
             const div = document.createElement('div');
             div.className = 'vol-card';
@@ -635,7 +657,6 @@
     }
 
     async function loadRating() {
-        // Можно реализовать позже
         document.getElementById('rating_list').innerHTML = "Рейтинг в разработке";
     }
 </script>
