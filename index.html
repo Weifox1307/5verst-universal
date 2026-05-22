@@ -367,8 +367,8 @@
     function closeQR() { closeModal('qr_modal'); }
 
     // ==================== ИНИЦИАЛИЗАЦИЯ ====================
-    alert("Launch Params: " + JSON.stringify(launchParams));
     async function init() {
+        alert("Launch Params: " + JSON.stringify(launchParams));
         try {
             vkUser = await vkBridge.send("VKWebAppGetUserInfo");
 
