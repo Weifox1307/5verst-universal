@@ -371,32 +371,42 @@
         try {
             vkUser = await vkBridge.send("VKWebAppGetUserInfo");
 
-            // === СПОСОБ 1: Получаем group_id через Launch Params (самый надёжный) ===
-            let launchParams = await vkBridge.send("VKWebAppGetLaunchParams");
-            currentVkGroupId = launchParams.group_id || launchParams.vk_group_id;
+            // === Получаем ID группы максимально надёжно ===
+            let launchParams = {};
+            try {
+                launchParams = await vkBridge.send("VKWebAppGetLaunchParams");
+            } catch (e) {}
 
-            // === СПОСОБ 2: Если не получилось — пробуем GetGroupInfo ===
-            if (!currentVkGroupId) {
+            currentVkGroupId = launchParams.group_id || launchParams.vk_group_id || launchParams.peer_id;
+
+            // Если peer_id — это чат, пытаемся извлечь group_id
+            if (currentVkGroupId && String(currentVkGroupId).startsWith('200000000')) {
+                // Это ID чата, а не группы. Пробуем получить group_id другим способом
                 try {
                     const groupInfo = await vkBridge.send("VKWebAppGetGroupInfo");
                     currentVkGroupId = groupInfo.id;
-                } catch (e) {
-                    console.warn("GetGroupInfo не сработал");
-                }
+                } catch (e) {}
             }
 
             if (!currentVkGroupId) {
-                throw new Error("Не удалось определить ID группы");
+                alert("Не удалось определить ID группы.\nПопробуйте открыть приложение из меню группы.");
+                return;
             }
 
-            console.log("✅ Group ID определён:", currentVkGroupId);
+            console.log("✅ Определён Group ID:", currentVkGroupId);
 
-            // Получаем конфиг парка
+            // Получаем данные парка
             const configRes = await fetch(`${SCRIPT_URL}?get_config=1&vk_group_id=${currentVkGroupId}`);
             const config = await configRes.json();
 
-            document.getElementById('park_name').innerText = config.park_name || "Парк 5 вёрст";
-            document.getElementById('about_park_name').innerText = config.park_name || "5 вёрст";
+            if (config.error) {
+                document.getElementById('park_name').innerHTML = `<span style="color:red;">Парк не найден в базе</span>`;
+                alert("Парк не найден в Registry!\nID группы: " + currentVkGroupId);
+                return;
+            }
+
+            document.getElementById('park_name').innerText = config.park_name;
+            document.getElementById('about_park_name').innerText = config.park_name;
 
             // Дата
             const dRes = await fetch(`${SCRIPT_URL}?get_date=1&vk_group_id=${currentVkGroupId}`);
@@ -409,9 +419,8 @@
             if (checkData.found) {
                 selectedVolunteer = { id: checkData.verst_id, full_name: checkData.full_name };
                 document.getElementById('verst_search').value = checkData.full_name;
-                const welcome = document.getElementById('welcome_back');
-                welcome.style.display = 'block';
-                welcome.innerHTML = `👋 <b>${vkUser.first_name}</b>, данные подставлены!<br><button class="btn-qr" onclick="showQR('${checkData.verst_id}', '${checkData.full_name}')">МОЯ КАРТОЧКА</button>`;
+                document.getElementById('welcome_back').style.display = 'block';
+                document.getElementById('welcome_back').innerHTML = `👋 <b>${vkUser.first_name}</b>, данные подставлены!`;
             }
 
             await loadQueue();
@@ -419,8 +428,7 @@
 
         } catch (e) {
             console.error(e);
-            document.getElementById('park_name').innerText = "Ошибка определения группы";
-            alert("Не удалось определить группу.\nОткройте приложение через группу или чат группы.");
+            document.getElementById('park_name').innerText = "Ошибка инициализации";
         }
     }
 
