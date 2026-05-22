@@ -319,8 +319,7 @@
 <script>
     vkBridge.send("VKWebAppInit");
 
-    // ==================== НАСТРОЙКИ ====================
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzCi6lE4JffsS9T17crFTdW8Mbgslt-NS0T41-xW46P6KQTjnaVR_7oaLdaY6jcfVU-/exec'; // ← Замени на свой GAS URL
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzCi6lE4JffsS9T17crFTdW8Mbgslt-NS0T41-xW46P6KQTjnaVR_7oaLdaY6jcfVU-/exec'; // ← Замени!
     const GITHUB_IMG_BASE = 'https://raw.githubusercontent.com/Weifox1307/5verst_stankozavod_bot_vk/main/';
 
     let selectedVolunteer = null;
@@ -371,18 +370,35 @@
     async function init() {
         try {
             vkUser = await vkBridge.send("VKWebAppGetUserInfo");
-            
-            // Получаем ID группы ВК, в которой открыто приложение
-            const groupInfo = await vkBridge.send("VKWebAppGetGroupInfo");
-            currentVkGroupId = groupInfo.id;
 
-            // Получаем название парка
+            // === СПОСОБ 1: Получаем group_id через Launch Params (самый надёжный) ===
+            let launchParams = await vkBridge.send("VKWebAppGetLaunchParams");
+            currentVkGroupId = launchParams.group_id || launchParams.vk_group_id;
+
+            // === СПОСОБ 2: Если не получилось — пробуем GetGroupInfo ===
+            if (!currentVkGroupId) {
+                try {
+                    const groupInfo = await vkBridge.send("VKWebAppGetGroupInfo");
+                    currentVkGroupId = groupInfo.id;
+                } catch (e) {
+                    console.warn("GetGroupInfo не сработал");
+                }
+            }
+
+            if (!currentVkGroupId) {
+                throw new Error("Не удалось определить ID группы");
+            }
+
+            console.log("✅ Group ID определён:", currentVkGroupId);
+
+            // Получаем конфиг парка
             const configRes = await fetch(`${SCRIPT_URL}?get_config=1&vk_group_id=${currentVkGroupId}`);
             const config = await configRes.json();
+
             document.getElementById('park_name').innerText = config.park_name || "Парк 5 вёрст";
             document.getElementById('about_park_name').innerText = config.park_name || "5 вёрст";
 
-            // Дата старта
+            // Дата
             const dRes = await fetch(`${SCRIPT_URL}?get_date=1&vk_group_id=${currentVkGroupId}`);
             const dData = await dRes.json();
             document.getElementById('event_date').innerText = dData.date;
@@ -395,7 +411,7 @@
                 document.getElementById('verst_search').value = checkData.full_name;
                 const welcome = document.getElementById('welcome_back');
                 welcome.style.display = 'block';
-                welcome.innerHTML = `👋 <b>${vkUser.first_name}</b>, твои данные подставлены!<br><button class="btn-qr" onclick="showQR('${checkData.verst_id}', '${checkData.full_name}')">МОЯ КАРТОЧКА УЧАСТНИКА</button>`;
+                welcome.innerHTML = `👋 <b>${vkUser.first_name}</b>, данные подставлены!<br><button class="btn-qr" onclick="showQR('${checkData.verst_id}', '${checkData.full_name}')">МОЯ КАРТОЧКА</button>`;
             }
 
             await loadQueue();
@@ -403,7 +419,8 @@
 
         } catch (e) {
             console.error(e);
-            alert("Ошибка загрузки. Убедитесь, что приложение открыто внутри группы ВК.");
+            document.getElementById('park_name').innerText = "Ошибка определения группы";
+            alert("Не удалось определить группу.\nОткройте приложение через группу или чат группы.");
         }
     }
 
